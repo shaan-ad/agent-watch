@@ -18,8 +18,8 @@ def _read_events(storage_dir):
 
 
 def test_span_basic(temp_storage):
-    with Span("data-processing") as span:
-        result = 1 + 1
+    with Span("data-processing"):
+        _ = 1 + 1
 
     events = _read_events(temp_storage)
     assert len(events) == 1
@@ -78,8 +78,8 @@ async def test_span_async(temp_storage):
 
 
 def test_nested_spans(temp_storage):
-    with Span("outer") as outer:
-        with Span("inner") as inner:
+    with Span("outer"):
+        with Span("inner"):
             pass
 
     events = _read_events(temp_storage)

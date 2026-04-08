@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
 
 from agent_watch.storage import (
     AgentStats,
-    ModelStats,
     aggregate_by_agent,
     aggregate_by_model,
     load_events,

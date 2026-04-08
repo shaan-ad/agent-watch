@@ -14,7 +14,6 @@ from agent_watch.storage import aggregate_by_agent, aggregate_by_model, load_eve
 @click.option("--days", "-d", default=7, help="Number of days to report on (default: 7)")
 def report_cmd(days: int):
     """Generate a full analytics report."""
-    events = load_events(days=days)
     previous_events = load_events(days=days * 2)
 
     # Split previous into "this period" and "last period"
