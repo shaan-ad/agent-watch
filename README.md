@@ -249,6 +249,10 @@ Agent Watch is designed to be the first tool you install, not the last. When you
 
 Your `.agent-watch/` JSONL data is portable. Take it with you.
 
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for the full feature plan: v0.2 (developer experience), v0.3 (agent intelligence), v0.4 (graduation path to Langfuse/Datadog/OTel), and v1.0 (production ready).
+
 ## Architecture
 
 ```
