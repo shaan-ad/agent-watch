@@ -16,9 +16,10 @@ def temp_storage(tmp_path, monkeypatch):
     storage_dir = tmp_path / ".agent-watch"
     storage_dir.mkdir()
     monkeypatch.setenv("AGENT_WATCH_DIR", str(storage_dir))
-    # Reset thread-local context between tests
+    # Reset context variables between tests
     import agent_watch.collector as collector
-    collector._context = __import__("threading").local()
+    collector._parent_id_var.set(None)
+    collector._children_var.set({})
     return storage_dir
 
 

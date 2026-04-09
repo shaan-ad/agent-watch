@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import contextvars
 import os
-import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from agent_watch.types import Event
 
-# Thread-local storage for the current span context
-_context = threading.local()
+# Context variables for span tracking (works with both threads and async)
+_parent_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "agent_watch_parent_id", default=None
+)
+_children_var: contextvars.ContextVar[Dict[str, List[str]]] = contextvars.ContextVar(
+    "agent_watch_children", default={}
+)
 
 # Default storage directory
 DEFAULT_DIR = ".agent-watch"
@@ -39,14 +44,14 @@ def write_event(event: Event) -> None:
 
 
 def get_current_parent_id() -> Optional[str]:
-    """Get the current parent span ID from thread-local context."""
-    return getattr(_context, "parent_id", None)
+    """Get the current parent span ID from context."""
+    return _parent_id_var.get()
 
 
 def set_current_parent_id(parent_id: Optional[str]) -> Optional[str]:
     """Set the current parent span ID. Returns the previous value."""
-    previous = getattr(_context, "parent_id", None)
-    _context.parent_id = parent_id
+    previous = _parent_id_var.get()
+    _parent_id_var.set(parent_id)
     return previous
 
 
@@ -56,14 +61,17 @@ def add_child_to_parent(parent_id: str, child_id: str) -> None:
     This is tracked in memory. When the parent event is written,
     its children list will include this child.
     """
-    children = getattr(_context, "children", {})
+    children = _children_var.get()
+    # Copy-on-write to avoid mutating shared default
     if parent_id not in children:
-        children[parent_id] = []
+        children = {**children, parent_id: []}
+    else:
+        children = {**children, parent_id: list(children[parent_id])}
     children[parent_id].append(child_id)
-    _context.children = children
+    _children_var.set(children)
 
 
 def get_children(parent_id: str) -> List[str]:
     """Get child IDs for a parent."""
-    children = getattr(_context, "children", {})
+    children = _children_var.get()
     return children.get(parent_id, [])

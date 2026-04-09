@@ -107,6 +107,7 @@ class AgentStats:
         self.total_cost = 0.0
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.error_messages: list[str] = []
 
     def add(self, event: Event) -> None:
         self.total_runs += 1
@@ -114,6 +115,8 @@ class AgentStats:
             self.successes += 1
         else:
             self.failures += 1
+            if event.error:
+                self.error_messages.append(event.error)
         self.total_duration_ms += event.duration_ms
         self.total_cost += event.metadata.get("cost_usd", 0.0)
         self.total_input_tokens += event.metadata.get("input_tokens", 0)

@@ -131,21 +131,51 @@ def report_cmd(days: int):
 
 
 def _detect_anomalies(events, agent_stats):
-    """Detect anomalies in the data."""
+    """Detect anomalies including per-day error rate spikes."""
     anomalies = []
 
+    # Group agent_run events by agent name and day
+    from collections import defaultdict
+
+    daily_stats = defaultdict(lambda: defaultdict(lambda: {"success": 0, "error": 0}))
+    for event in events:
+        if event.type != "agent_run":
+            continue
+        day = datetime.fromtimestamp(event.start_time, tz=timezone.utc).strftime("%b %-d")
+        daily_stats[event.name][day][event.status] += 1
+
+    # Detect per-day spikes vs overall rate
     for name, stats in agent_stats.items():
-        if stats.total_runs >= 5 and stats.success_rate < 0.85:
-            anomalies.append(
-                f"{name} has a {format_percentage(1 - stats.success_rate)} error rate "
-                f"({stats.failures} failures in {stats.total_runs} runs)"
-            )
+        if stats.total_runs < 3:
+            continue
+
+        overall_error_rate = 1 - stats.success_rate
+
+        for day, counts in daily_stats.get(name, {}).items():
+            day_total = counts["success"] + counts["error"]
+            if day_total < 2:
+                continue
+            day_error_rate = counts["error"] / day_total
+
+            # Spike: day error rate is significantly higher than overall
+            if day_error_rate > overall_error_rate + 0.05 and day_error_rate >= 0.1:
+                anomalies.append(
+                    f"{name} error rate spiked from "
+                    f"{format_percentage(overall_error_rate)} to "
+                    f"{format_percentage(day_error_rate)} on {day}"
+                )
+            elif stats.success_rate < 0.85:
+                # Fallback: flag agents with high overall error rate
+                anomalies.append(
+                    f"{name} has a {format_percentage(1 - stats.success_rate)} error rate "
+                    f"({stats.failures} failures in {stats.total_runs} runs)"
+                )
 
     return anomalies
 
 
 def _generate_recommendations(agent_stats, model_stats, total_cost):
-    """Generate actionable recommendations."""
+    """Generate actionable recommendations with error pattern detection."""
     recs = []
 
     if agent_stats:
@@ -155,12 +185,35 @@ def _generate_recommendations(agent_stats, model_stats, total_cost):
         top = sorted_agents[0]
         if total_cost > 0 and top.total_cost / total_cost > 0.4:
             recs.append(
-                f"{top.name} accounts for {format_percentage(top.total_cost / total_cost)} "
-                f"of total cost; consider optimizing prompts or using a cheaper model"
+                f"{top.name} uses {format_percentage(top.total_cost / total_cost)} "
+                f"of budget; consider cheaper model for initial pass"
             )
 
     for name, stats in (agent_stats or {}).items():
         if stats.failures > 0 and stats.success_rate < 0.9:
-            recs.append(f"Investigate {name} failures ({stats.failures} errors)")
+            pattern = _detect_error_pattern(stats)
+            if pattern:
+                recs.append(
+                    f"Investigate {name} failures "
+                    f"({stats.failures} errors, pattern: \"{pattern}\")"
+                )
+            else:
+                recs.append(f"Investigate {name} failures ({stats.failures} errors)")
 
     return recs
+
+
+def _detect_error_pattern(stats):
+    """Find the most common error message pattern for an agent."""
+    if not hasattr(stats, "error_messages") or not stats.error_messages:
+        return None
+
+    from collections import Counter
+    counts = Counter(stats.error_messages)
+    most_common, count = counts.most_common(1)[0]
+    if count >= 2 or len(stats.error_messages) == 1:
+        # Truncate long messages
+        if len(most_common) > 50:
+            return most_common[:50] + "..."
+        return most_common
+    return None
