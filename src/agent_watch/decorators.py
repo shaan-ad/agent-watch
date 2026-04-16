@@ -106,9 +106,11 @@ def _finish_span(
 ) -> None:
     span.children = get_children(span.span_id)
     span.finish(status=status, error=error)
-    write_span(span)
-    set_current_parent_id(previous_parent)
-    set_current_trace_id(previous_trace)
+    try:
+        write_span(span)
+    finally:
+        set_current_parent_id(previous_parent)
+        set_current_trace_id(previous_trace)
 
 
 async def _run_agent_async(func: Callable, agent_name: str, tags, args, kwargs) -> Any:
@@ -179,8 +181,9 @@ def _extract_llm_attributes(span: Span, result: Any, model: str) -> None:
     elif isinstance(result, str):
         content = result
 
-    span.attributes[otel.GEN_AI_USAGE_INPUT_TOKENS] = input_tokens
-    span.attributes[otel.GEN_AI_USAGE_OUTPUT_TOKENS] = output_tokens
+    if input_tokens or output_tokens:
+        span.attributes[otel.GEN_AI_USAGE_INPUT_TOKENS] = input_tokens
+        span.attributes[otel.GEN_AI_USAGE_OUTPUT_TOKENS] = output_tokens
     span.output_preview = preview(content)
 
     if model and (input_tokens or output_tokens):

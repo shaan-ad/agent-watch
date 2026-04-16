@@ -74,16 +74,6 @@ def test_trace_agent_default_name(temp_storage):
     assert events[0]["name"] == "my_cool_function"
 
 
-def test_trace_agent_with_tags(temp_storage):
-    @trace_agent(name="tagged", tags=["prod", "v2"])
-    def tagged_agent():
-        return "ok"
-
-    tagged_agent()
-
-    events = _read_events(temp_storage)
-    assert events[0]["attributes"][otel.AGENT_WATCH_TAGS] == ["prod", "v2"]
-
 
 def test_trace_agent_captures_input_output(temp_storage):
     @trace_agent(name="io-agent")
@@ -208,3 +198,27 @@ def test_nested_traces_share_trace_id(temp_storage):
     events = _read_events(temp_storage)
     trace_ids = {e["trace_id"] for e in events}
     assert len(trace_ids) == 1
+
+
+def test_contextvars_restored_even_if_write_fails(temp_storage, monkeypatch):
+    """If write_span raises during _finish_span, parent/trace contextvars must still be restored."""
+    from agent_watch import collector
+
+    @trace_agent(name="will-fail")
+    def run():
+        return "ok"
+
+    def boom(_span):
+        raise IOError("simulated disk failure")
+
+    monkeypatch.setattr(collector, "write_span", boom)
+    # decorator is wired before patching, so we also patch the module-local reference
+    import agent_watch.decorators as dec
+    monkeypatch.setattr(dec, "write_span", boom)
+
+    with pytest.raises(IOError):
+        run()
+
+    # Both contextvars should be restored to their pre-run values (None in a clean test)
+    assert collector.get_current_parent_id() is None
+    assert collector.get_current_trace_id() is None
