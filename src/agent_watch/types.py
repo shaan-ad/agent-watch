@@ -50,8 +50,12 @@ class Span:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> Span:
-        if "schema" in data and data["schema"] == otel.SCHEMA_VERSION:
-            return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        if not data:
+            raise ValueError("Cannot deserialize empty dict into Span")
+        if "schema" in data:
+            if data["schema"] == otel.SCHEMA_VERSION:
+                return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+            raise ValueError(f"Unknown schema version: {data['schema']!r}")
         return _from_legacy_v01(data)
 
     @classmethod
@@ -127,7 +131,7 @@ def make_agent_span(
 
 def make_llm_span(
     name: str,
-    model: str,
+    model: str = "",
     parent_span_id: Optional[str] = None,
     trace_id: Optional[str] = None,
 ) -> Span:

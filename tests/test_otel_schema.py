@@ -1,5 +1,7 @@
 """Tests for OTel attribute constants and schema mapping."""
 
+import pytest
+
 from agent_watch import otel
 from agent_watch.types import Span, make_agent_span, make_llm_span, make_generic_span
 
@@ -75,7 +77,8 @@ def test_span_from_json_reads_v01_legacy_format():
         '"parent_id": null, "start_time": 100.0, "end_time": 101.0, '
         '"duration_ms": 1000.0, "status": "success", "error": null, '
         '"input_preview": "q", "output_preview": "a", '
-        '"metadata": {"model": "gpt-4", "cost_usd": 0.5, "tags": ["x"]}, '
+        '"metadata": {"model": "gpt-4", "cost_usd": 0.5, "tags": ["x"], '
+        '"input_tokens": 123, "output_tokens": 45}, '
         '"children": []}'
     )
     s = Span.from_json(legacy)
@@ -88,6 +91,8 @@ def test_span_from_json_reads_v01_legacy_format():
     assert s.attributes[otel.AGENT_WATCH_TAGS] == ["x"]
     # Legacy spans get a synthetic trace_id equal to their span_id
     assert s.trace_id == "old-1"
+    assert s.attributes[otel.GEN_AI_USAGE_INPUT_TOKENS] == 123
+    assert s.attributes[otel.GEN_AI_USAGE_OUTPUT_TOKENS] == 45
 
 
 def test_make_agent_span_sets_kind():
@@ -107,3 +112,13 @@ def test_make_llm_span_sets_kind_and_model():
 def test_make_generic_span_sets_kind():
     s = make_generic_span("preprocessing")
     assert s.kind == otel.KIND_SPAN
+
+
+def test_span_from_dict_raises_on_empty_dict():
+    with pytest.raises(ValueError, match="empty dict"):
+        Span.from_dict({})
+
+
+def test_span_from_dict_raises_on_unknown_schema():
+    with pytest.raises(ValueError, match="Unknown schema"):
+        Span.from_dict({"schema": "agent-watch/v999", "name": "x"})
