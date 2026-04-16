@@ -28,12 +28,14 @@ DEFAULT_DIR = ".agent-watch"
 
 
 def get_storage_dir() -> Path:
+    """Get the storage directory, creating it if needed."""
     dir_path = Path(os.environ.get("AGENT_WATCH_DIR", DEFAULT_DIR))
     dir_path.mkdir(parents=True, exist_ok=True)
     return dir_path
 
 
 def get_today_file() -> Path:
+    """Get the JSONL file path for today (UTC)."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return get_storage_dir() / f"{today}.jsonl"
 
@@ -51,26 +53,31 @@ write_event = write_span
 
 
 def get_current_parent_id() -> Optional[str]:
+    """Get the current parent span ID from context."""
     return _parent_span_id_var.get()
 
 
 def set_current_parent_id(parent_id: Optional[str]) -> Optional[str]:
+    """Set the current parent span ID. Returns the previous value."""
     previous = _parent_span_id_var.get()
     _parent_span_id_var.set(parent_id)
     return previous
 
 
 def get_current_trace_id() -> Optional[str]:
+    """Get the current trace ID from context."""
     return _trace_id_var.get()
 
 
 def set_current_trace_id(trace_id: Optional[str]) -> Optional[str]:
+    """Set the current trace ID. Returns the previous value."""
     previous = _trace_id_var.get()
     _trace_id_var.set(trace_id)
     return previous
 
 
 def add_child_to_parent(parent_id: str, child_id: str) -> None:
+    """Record a child span under its parent (in-memory context)."""
     children = _children_var.get()
     if parent_id not in children:
         children = {**children, parent_id: []}
@@ -81,5 +88,6 @@ def add_child_to_parent(parent_id: str, child_id: str) -> None:
 
 
 def get_children(parent_id: str) -> List[str]:
+    """Get child span IDs for a parent."""
     children = _children_var.get()
     return children.get(parent_id, [])
