@@ -20,6 +20,7 @@ def temp_storage(tmp_path, monkeypatch):
     import agent_watch.collector as collector
     collector._parent_id_var.set(None)
     collector._children_var.set({})
+    collector._trace_id_var.set(None)
     return storage_dir
 
 

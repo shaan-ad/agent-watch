@@ -76,3 +76,18 @@ def test_parent_id_context():
     # Clear
     set_current_parent_id(None)
     assert get_current_parent_id() is None
+
+
+def test_get_current_trace_id_default_is_none():
+    from agent_watch.collector import get_current_trace_id
+    assert get_current_trace_id() is None
+
+
+def test_set_current_trace_id_returns_previous():
+    from agent_watch.collector import get_current_trace_id, set_current_trace_id
+    prev = set_current_trace_id("trace-abc")
+    assert get_current_trace_id() == "trace-abc"
+    assert prev is None
+    prev2 = set_current_trace_id(None)
+    assert prev2 == "trace-abc"
+    assert get_current_trace_id() is None
