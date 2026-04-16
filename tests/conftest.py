@@ -7,7 +7,7 @@ from typing import List
 
 import pytest
 
-from agent_watch.types import Event
+from agent_watch.types import Span
 
 
 @pytest.fixture(autouse=True)
@@ -25,62 +25,87 @@ def temp_storage(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def sample_events(temp_storage) -> List[Event]:
-    """Write sample events to storage and return them."""
+def sample_events(temp_storage) -> List[Span]:
+    """Write sample spans to storage and return them."""
     import time
+    from agent_watch import otel
+    from agent_watch.types import Span
+
     now = time.time()
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     filepath = temp_storage / f"{today}.jsonl"
 
-    events = [
-        Event(
-            id="evt-1",
-            type="agent_run",
+    spans = [
+        Span(
+            span_id="evt-1",
+            trace_id="evt-1",
+            kind=otel.KIND_AGENT,
             name="research-agent",
             start_time=now - 100,
             end_time=now - 98,
             duration_ms=2000.0,
-            status="success",
+            status=otel.STATUS_OK,
             input_preview="quantum computing",
             output_preview="Summary of quantum computing...",
-            metadata={"tags": ["test"], "cost_usd": 0.005, "input_tokens": 500, "output_tokens": 200},
+            attributes={
+                otel.AGENT_WATCH_TAGS: ["test"],
+                otel.AGENT_WATCH_COST_USD: 0.005,
+                otel.GEN_AI_USAGE_INPUT_TOKENS: 500,
+                otel.GEN_AI_USAGE_OUTPUT_TOKENS: 200,
+            },
         ),
-        Event(
-            id="evt-2",
-            type="llm_call",
+        Span(
+            span_id="evt-2",
+            trace_id="evt-1",
+            kind=otel.KIND_LLM,
             name="call_claude",
-            parent_id="evt-1",
+            parent_span_id="evt-1",
             start_time=now - 99.5,
             end_time=now - 98.5,
             duration_ms=1000.0,
-            status="success",
-            metadata={"model": "claude-sonnet-4-20250514", "input_tokens": 500, "output_tokens": 200, "cost_usd": 0.0045},
+            status=otel.STATUS_OK,
+            attributes={
+                otel.GEN_AI_REQUEST_MODEL: "claude-sonnet-4-20250514",
+                otel.GEN_AI_USAGE_INPUT_TOKENS: 500,
+                otel.GEN_AI_USAGE_OUTPUT_TOKENS: 200,
+                otel.AGENT_WATCH_COST_USD: 0.0045,
+            },
         ),
-        Event(
-            id="evt-3",
-            type="agent_run",
+        Span(
+            span_id="evt-3",
+            trace_id="evt-3",
+            kind=otel.KIND_AGENT,
             name="code-reviewer",
             start_time=now - 90,
             end_time=now - 85,
             duration_ms=5000.0,
-            status="error",
+            status=otel.STATUS_ERROR,
             error="Context length exceeded",
-            metadata={"cost_usd": 0.01, "input_tokens": 8000, "output_tokens": 0},
+            attributes={
+                otel.AGENT_WATCH_COST_USD: 0.01,
+                otel.GEN_AI_USAGE_INPUT_TOKENS: 8000,
+                otel.GEN_AI_USAGE_OUTPUT_TOKENS: 0,
+            },
         ),
-        Event(
-            id="evt-4",
-            type="agent_run",
+        Span(
+            span_id="evt-4",
+            trace_id="evt-4",
+            kind=otel.KIND_AGENT,
             name="research-agent",
             start_time=now - 80,
             end_time=now - 78,
             duration_ms=2000.0,
-            status="success",
-            metadata={"cost_usd": 0.006, "input_tokens": 600, "output_tokens": 250},
+            status=otel.STATUS_OK,
+            attributes={
+                otel.AGENT_WATCH_COST_USD: 0.006,
+                otel.GEN_AI_USAGE_INPUT_TOKENS: 600,
+                otel.GEN_AI_USAGE_OUTPUT_TOKENS: 250,
+            },
         ),
     ]
 
     with open(filepath, "w") as f:
-        for event in events:
-            f.write(event.to_json() + "\n")
+        for span in spans:
+            f.write(span.to_json() + "\n")
 
-    return events
+    return spans
