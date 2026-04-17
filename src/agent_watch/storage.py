@@ -30,6 +30,9 @@ def load_spans(
     for filepath in sorted(dir_path.glob("*.jsonl")):
         try:
             file_date = datetime.strptime(filepath.stem, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            # One-day buffer: file dates are UTC-naive from the filename, and cutoff
+            # is UTC. A file stamped the day of the cutoff may still contain spans
+            # within range.
             if file_date < cutoff - timedelta(days=1):
                 continue
         except ValueError:
@@ -43,6 +46,10 @@ def load_spans(
                 try:
                     span = Span.from_json(line)
                 except (json.JSONDecodeError, TypeError, ValueError):
+                    # Silently skip corrupt or unknown-schema lines. JSONDecodeError
+                    # catches malformed JSON; TypeError catches bad dataclass field
+                    # assignment; ValueError catches Span.from_dict explicit raises
+                    # (empty dict, unknown schema version).
                     continue
 
                 if agent_name and span.name != agent_name:
@@ -67,7 +74,15 @@ def load_events(
     event_type: Optional[str] = None,
     storage_dir: Optional[Path] = None,
 ) -> List[Span]:
-    """Deprecated: use load_spans. Translates v0.1 argument names."""
+    """Deprecated: use load_spans. Translates v0.1 argument names.
+
+    Accepted v0.1 values:
+      event_type: "agent_run" | "llm_call" | "span"
+      status: "success" | "error"
+
+    v1.0 values ("ok", "agent", "llm") also pass through unchanged.
+    Unknown values pass through and match nothing (same as load_spans).
+    """
     kind_map = {"agent_run": otel.KIND_AGENT, "llm_call": otel.KIND_LLM, "span": otel.KIND_SPAN}
     kind = kind_map.get(event_type) if event_type else None
     status_map = {"success": otel.STATUS_OK, "error": otel.STATUS_ERROR}
