@@ -4,13 +4,30 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/shaan-ad/agent-watch/actions/workflows/ci.yml/badge.svg)](https://github.com/shaan-ad/agent-watch/actions)
 
-**Know what your agents cost before you get the bill.**
+**The circuit breaker your agents don't have. Set a budget. Get a kill-switch.**
 
-Two decorators. One CLI. Zero config. Agent Watch gives you cost, latency, and reliability data from the first time you run your agent. No accounts, no dashboards, no infrastructure. Just `pip install` and go.
+Two decorators. One CLI. Zero config. Agent Watch enforces a hard USD cap on every agent run: when cumulative LLM cost crosses the budget, the next call raises `BudgetExceeded` instead of firing. No accounts, no dashboards, no infrastructure. Just `pip install` and go.
 
 ```bash
 pip install agent-watch
 ```
+
+```python
+from agent_watch import trace_agent, trace_llm_call, BudgetExceeded
+
+@trace_agent(name="research", budget_usd=5.00)
+async def research(topic: str) -> str:
+    # Your agent loop. If cumulative spend crosses $5.00,
+    # the next LLM call raises BudgetExceeded instead of firing.
+    return await run_loop(topic)
+
+try:
+    await research("competitor pricing")
+except BudgetExceeded as e:
+    log.error(f"Killed at ${e.spent_usd:.2f} of ${e.budget_usd:.2f}")
+```
+
+Alongside enforcement, Agent Watch tracks cost, latency, and reliability from the first run:
 
 ```python
 from agent_watch import trace_agent, trace_llm_call
