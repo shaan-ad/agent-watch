@@ -6,3 +6,5 @@ build/
 *.pyc
 .ruff_cache/
 .agent-watch/
+uv.lock
+.venv/
