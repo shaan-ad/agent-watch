@@ -8,6 +8,15 @@ import uuid
 from typing import Any, Callable, List, Optional
 
 from agent_watch import otel
+from agent_watch.budget import (
+    Budget,
+    BudgetExceeded,
+    check_all_budgets,
+    get_env_budget_cap_usd,
+    pop_budget,
+    push_budget,
+    record_spend,
+)
 from agent_watch.collector import (
     add_child_to_parent,
     get_children,
@@ -24,8 +33,19 @@ from agent_watch.types import Span, make_agent_span, make_llm_span, preview
 def trace_agent(
     name: Optional[str] = None,
     tags: Optional[List[str]] = None,
+    budget_usd: Optional[float] = None,
+    on_exceed: str = "raise",
 ) -> Callable:
-    """Trace an agent function (sync or async)."""
+    """Trace an agent function (sync or async).
+
+    Args:
+        name: Agent name (defaults to function name).
+        tags: Optional list of tags.
+        budget_usd: Optional USD cap. If cumulative cost in this agent (and
+            children) exceeds the cap, BudgetExceeded is raised after the
+            offending LLM call. Overrides AGENT_WATCH_BUDGET_USD env var.
+        on_exceed: "raise" (default) or "warn". Applies when a budget is active.
+    """
 
     def decorator(func: Callable) -> Callable:
         agent_name = name or func.__name__
@@ -34,13 +54,17 @@ def trace_agent(
 
             @functools.wraps(func)
             async def async_wrapper(*args, **kwargs) -> Any:
-                return await _run_agent_async(func, agent_name, tags, args, kwargs)
+                return await _run_agent_async(
+                    func, agent_name, tags, budget_usd, on_exceed, args, kwargs
+                )
 
             return async_wrapper
 
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
-            return _run_agent_sync(func, agent_name, tags, args, kwargs)
+            return _run_agent_sync(
+                func, agent_name, tags, budget_usd, on_exceed, args, kwargs
+            )
 
         return sync_wrapper
 
@@ -113,30 +137,59 @@ def _finish_span(
         set_current_trace_id(previous_trace)
 
 
-async def _run_agent_async(func: Callable, agent_name: str, tags, args, kwargs) -> Any:
+def _resolve_budget(agent_name: str, budget_usd: Optional[float], on_exceed: str) -> Optional[Budget]:
+    cap = budget_usd if budget_usd is not None else get_env_budget_cap_usd()
+    if cap is None:
+        return None
+    return Budget(cap_usd=cap, agent_name=agent_name, on_exceed=on_exceed)
+
+
+async def _run_agent_async(func, agent_name, tags, budget_usd, on_exceed, args, kwargs):
+    budget = _resolve_budget(agent_name, budget_usd, on_exceed)
+    previous_stack = push_budget(budget) if budget else None
     span, prev_parent, prev_trace = _start_agent_span(agent_name, tags)
     span.input_preview = preview(_format_args(args, kwargs))
+    if budget:
+        span.attributes[otel.AGENT_WATCH_BUDGET_USD] = budget.cap_usd
     try:
         result = await func(*args, **kwargs)
         span.output_preview = preview(result)
         _finish_span(span, prev_parent, prev_trace, otel.STATUS_OK, None)
         return result
+    except BudgetExceeded as e:
+        span.attributes[otel.AGENT_WATCH_BUDGET_EXCEEDED] = True
+        _finish_span(span, prev_parent, prev_trace, otel.STATUS_ERROR, str(e))
+        raise
     except Exception as e:
         _finish_span(span, prev_parent, prev_trace, otel.STATUS_ERROR, str(e))
         raise
+    finally:
+        if previous_stack is not None:
+            pop_budget(previous_stack)
 
 
-def _run_agent_sync(func: Callable, agent_name: str, tags, args, kwargs) -> Any:
+def _run_agent_sync(func, agent_name, tags, budget_usd, on_exceed, args, kwargs):
+    budget = _resolve_budget(agent_name, budget_usd, on_exceed)
+    previous_stack = push_budget(budget) if budget else None
     span, prev_parent, prev_trace = _start_agent_span(agent_name, tags)
     span.input_preview = preview(_format_args(args, kwargs))
+    if budget:
+        span.attributes[otel.AGENT_WATCH_BUDGET_USD] = budget.cap_usd
     try:
         result = func(*args, **kwargs)
         span.output_preview = preview(result)
         _finish_span(span, prev_parent, prev_trace, otel.STATUS_OK, None)
         return result
+    except BudgetExceeded as e:
+        span.attributes[otel.AGENT_WATCH_BUDGET_EXCEEDED] = True
+        _finish_span(span, prev_parent, prev_trace, otel.STATUS_ERROR, str(e))
+        raise
     except Exception as e:
         _finish_span(span, prev_parent, prev_trace, otel.STATUS_ERROR, str(e))
         raise
+    finally:
+        if previous_stack is not None:
+            pop_budget(previous_stack)
 
 
 async def _run_llm_async(func: Callable, call_name: str, model: str, args, kwargs) -> Any:
@@ -146,7 +199,10 @@ async def _run_llm_async(func: Callable, call_name: str, model: str, args, kwarg
         result = await func(*args, **kwargs)
         _extract_llm_attributes(span, result, model)
         _finish_span(span, prev_parent, prev_trace, otel.STATUS_OK, None)
+        check_all_budgets()
         return result
+    except BudgetExceeded:
+        raise
     except Exception as e:
         _finish_span(span, prev_parent, prev_trace, otel.STATUS_ERROR, str(e))
         raise
@@ -159,7 +215,10 @@ def _run_llm_sync(func: Callable, call_name: str, model: str, args, kwargs) -> A
         result = func(*args, **kwargs)
         _extract_llm_attributes(span, result, model)
         _finish_span(span, prev_parent, prev_trace, otel.STATUS_OK, None)
+        check_all_budgets()
         return result
+    except BudgetExceeded:
+        raise
     except Exception as e:
         _finish_span(span, prev_parent, prev_trace, otel.STATUS_ERROR, str(e))
         raise
@@ -190,6 +249,7 @@ def _extract_llm_attributes(span: Span, result: Any, model: str) -> None:
         cost = estimate_cost(model, input_tokens, output_tokens)
         if cost is not None:
             span.attributes[otel.AGENT_WATCH_COST_USD] = cost
+            record_spend(cost)
 
 
 def _format_args(args: tuple, kwargs: dict) -> str:

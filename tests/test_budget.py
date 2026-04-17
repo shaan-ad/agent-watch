@@ -90,3 +90,107 @@ def test_record_spend_across_nested_budgets():
 
     pop_budget(prev_inner)
     pop_budget(prev_outer)
+
+
+import asyncio
+
+from agent_watch import trace_agent, trace_llm_call
+from agent_watch.budget import BudgetExceeded
+
+
+def test_trace_agent_with_budget_under_cap_does_not_raise(temp_storage):
+    @trace_llm_call(model="gpt-4o")
+    def call(p: str) -> dict:
+        return {"content": "ok", "input_tokens": 100, "output_tokens": 50}
+
+    @trace_agent(name="cheap", budget_usd=10.0)
+    def run():
+        return call("hi")
+
+    result = run()
+    assert result["content"] == "ok"
+
+
+def test_trace_agent_raises_budget_exceeded_after_over_cap_call(temp_storage):
+    """Single over-cap call: the call fires, but the decorator raises on exit."""
+    @trace_llm_call(model="gpt-4o")
+    def call(p: str) -> dict:
+        # gpt-4o: 100 * 2.50/1M + 50 * 10/1M = $0.00075 per call
+        return {"content": "x", "input_tokens": 100, "output_tokens": 50}
+
+    @trace_agent(name="tight", budget_usd=0.0001)  # cap below single-call cost
+    def run():
+        return call("hi")
+
+    with pytest.raises(BudgetExceeded) as exc_info:
+        run()
+    assert exc_info.value.agent_name == "tight"
+    assert exc_info.value.budget_usd == 0.0001
+    assert exc_info.value.spent_usd > 0.0001
+
+
+def test_trace_agent_budget_stops_second_call_in_loop(temp_storage):
+    """After first over-cap call, next call is not made because exception propagated."""
+    call_count = {"n": 0}
+
+    @trace_llm_call(model="gpt-4o")
+    def call(p: str) -> dict:
+        call_count["n"] += 1
+        return {"content": "x", "input_tokens": 1000, "output_tokens": 500}
+
+    @trace_agent(name="loop", budget_usd=0.0001)
+    def run():
+        for i in range(10):
+            call(f"turn {i}")
+        return "done"
+
+    with pytest.raises(BudgetExceeded):
+        run()
+    assert call_count["n"] == 1  # second call never fires
+
+
+def test_trace_agent_budget_warn_mode_does_not_raise(temp_storage):
+    @trace_llm_call(model="gpt-4o")
+    def call(p: str) -> dict:
+        return {"content": "x", "input_tokens": 1000, "output_tokens": 500}
+
+    @trace_agent(name="warner", budget_usd=0.0001, on_exceed="warn")
+    def run():
+        for i in range(3):
+            call(f"turn {i}")
+        return "done"
+
+    result = run()  # must not raise
+    assert result == "done"
+
+
+@pytest.mark.asyncio
+async def test_trace_agent_budget_async(temp_storage):
+    @trace_llm_call(model="gpt-4o")
+    async def call(p: str) -> dict:
+        return {"content": "x", "input_tokens": 10000, "output_tokens": 5000}
+
+    @trace_agent(name="a", budget_usd=0.0001)
+    async def run():
+        await call("x")
+        await call("y")
+        return "done"
+
+    with pytest.raises(BudgetExceeded):
+        await run()
+
+
+def test_env_budget_cap(temp_storage, monkeypatch):
+    monkeypatch.setenv("AGENT_WATCH_BUDGET_USD", "0.0001")
+
+    @trace_llm_call(model="gpt-4o")
+    def call(p: str) -> dict:
+        return {"content": "x", "input_tokens": 1000, "output_tokens": 500}
+
+    @trace_agent(name="env")
+    def run():
+        for i in range(5):
+            call(f"turn {i}")
+
+    with pytest.raises(BudgetExceeded):
+        run()
