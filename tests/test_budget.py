@@ -194,3 +194,46 @@ def test_env_budget_cap(temp_storage, monkeypatch):
 
     with pytest.raises(BudgetExceeded):
         run()
+
+
+def test_nested_agents_both_budgets_count_spend(temp_storage):
+    """Parent and child budgets both accumulate spend from LLM calls anywhere underneath."""
+
+    @trace_llm_call(model="gpt-4o")
+    def call(p: str) -> dict:
+        return {"content": "x", "input_tokens": 500, "output_tokens": 250}
+
+    @trace_agent(name="child", budget_usd=10.0)
+    def child():
+        call("inner")
+        return "child-done"
+
+    @trace_agent(name="parent", budget_usd=0.0001)
+    def parent():
+        child()
+        return "parent-done"
+
+    with pytest.raises(BudgetExceeded) as exc_info:
+        parent()
+    assert exc_info.value.agent_name == "parent"
+
+
+def test_sibling_agents_do_not_share_budget(temp_storage):
+    """Two sequential agents with their own budgets: spend in one doesn't affect the other."""
+
+    @trace_llm_call(model="gpt-4o")
+    def call(p: str) -> dict:
+        return {"content": "x", "input_tokens": 100, "output_tokens": 50}
+
+    @trace_agent(name="a", budget_usd=10.0)
+    def a():
+        call("a")
+        return "ok"
+
+    @trace_agent(name="b", budget_usd=10.0)
+    def b():
+        call("b")
+        return "ok"
+
+    assert a() == "ok"
+    assert b() == "ok"
