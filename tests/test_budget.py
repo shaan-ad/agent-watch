@@ -1,6 +1,8 @@
 """Tests for budget enforcement."""
 
 import pytest
+
+from agent_watch import trace_agent, trace_llm_call
 from agent_watch.budget import Budget, BudgetExceeded
 
 
@@ -90,12 +92,6 @@ def test_record_spend_across_nested_budgets():
 
     pop_budget(prev_inner)
     pop_budget(prev_outer)
-
-
-import asyncio
-
-from agent_watch import trace_agent, trace_llm_call
-from agent_watch.budget import BudgetExceeded
 
 
 def test_trace_agent_with_budget_under_cap_does_not_raise(temp_storage):
