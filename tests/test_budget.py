@@ -50,3 +50,43 @@ def test_budget_exceeded_flag():
     assert not b.is_exceeded()
     b.add_spend(10.0)
     assert b.is_exceeded()
+
+
+def test_push_pop_budget_restores_stack():
+    """pop_budget must restore the exact pre-push state."""
+    from agent_watch.budget import active_budgets, pop_budget, push_budget
+
+    assert active_budgets() == []
+
+    b1 = Budget(cap_usd=10.0, agent_name="outer")
+    prev = push_budget(b1)
+    assert len(active_budgets()) == 1
+    assert active_budgets()[0] is b1
+
+    b2 = Budget(cap_usd=5.0, agent_name="inner")
+    prev2 = push_budget(b2)
+    assert len(active_budgets()) == 2
+
+    pop_budget(prev2)
+    assert len(active_budgets()) == 1
+    assert active_budgets()[0] is b1
+
+    pop_budget(prev)
+    assert active_budgets() == []
+
+
+def test_record_spend_across_nested_budgets():
+    """record_spend adds to every budget on the stack."""
+    from agent_watch.budget import pop_budget, push_budget, record_spend
+
+    outer = Budget(cap_usd=100.0, agent_name="outer")
+    inner = Budget(cap_usd=10.0, agent_name="inner")
+    prev_outer = push_budget(outer)
+    prev_inner = push_budget(inner)
+
+    record_spend(2.5)
+    assert outer.spent_usd == pytest.approx(2.5)
+    assert inner.spent_usd == pytest.approx(2.5)
+
+    pop_budget(prev_inner)
+    pop_budget(prev_outer)

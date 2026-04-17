@@ -67,11 +67,15 @@ _budget_stack_var: contextvars.ContextVar[List[Budget]] = contextvars.ContextVar
 
 
 def push_budget(budget: Budget) -> List[Budget]:
-    """Push a budget onto the context stack. Returns the previous stack for restoration."""
-    current = list(_budget_stack_var.get())
-    previous = current
-    current.append(budget)
-    _budget_stack_var.set(current)
+    """Push a budget onto the context stack. Returns the previous stack for restoration.
+
+    The returned list is a fresh copy of the pre-push state. Callers pass it
+    back to pop_budget unchanged. Do not mutate or inspect it.
+    """
+    previous = list(_budget_stack_var.get())
+    new_stack = list(previous)
+    new_stack.append(budget)
+    _budget_stack_var.set(new_stack)
     return previous
 
 
