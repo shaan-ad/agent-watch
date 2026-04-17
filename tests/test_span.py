@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from agent_watch import otel
 from agent_watch.span import Span
 
 
@@ -23,9 +24,9 @@ def test_span_basic(temp_storage):
 
     events = _read_events(temp_storage)
     assert len(events) == 1
-    assert events[0]["type"] == "span"
+    assert events[0]["kind"] == otel.KIND_SPAN
     assert events[0]["name"] == "data-processing"
-    assert events[0]["status"] == "success"
+    assert events[0]["status"] == otel.STATUS_OK
     assert events[0]["duration_ms"] > 0
 
 
@@ -35,7 +36,7 @@ def test_span_captures_error(temp_storage):
             raise ValueError("oops")
 
     events = _read_events(temp_storage)
-    assert events[0]["status"] == "error"
+    assert events[0]["status"] == otel.STATUS_ERROR
     assert "oops" in events[0]["error"]
 
 
@@ -45,8 +46,8 @@ def test_span_metadata(temp_storage):
         span.set_metadata("source", "database")
 
     events = _read_events(temp_storage)
-    assert events[0]["metadata"]["rows"] == 100
-    assert events[0]["metadata"]["source"] == "database"
+    assert events[0]["attributes"]["rows"] == 100
+    assert events[0]["attributes"]["source"] == "database"
 
 
 def test_span_input_output(temp_storage):
@@ -64,7 +65,7 @@ def test_span_with_tags(temp_storage):
         pass
 
     events = _read_events(temp_storage)
-    assert events[0]["metadata"]["tags"] == ["test", "v1"]
+    assert events[0]["attributes"][otel.AGENT_WATCH_TAGS] == ["test", "v1"]
 
 
 @pytest.mark.asyncio
@@ -74,7 +75,7 @@ async def test_span_async(temp_storage):
 
     events = _read_events(temp_storage)
     assert events[0]["name"] == "async-span"
-    assert events[0]["metadata"]["async"] is True
+    assert events[0]["attributes"]["async"] is True
 
 
 def test_nested_spans(temp_storage):
@@ -88,4 +89,4 @@ def test_nested_spans(temp_storage):
     inner_event = next(e for e in events if e["name"] == "inner")
     outer_event = next(e for e in events if e["name"] == "outer")
 
-    assert inner_event["parent_id"] == outer_event["id"]
+    assert inner_event["parent_span_id"] == outer_event["span_id"]

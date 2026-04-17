@@ -1,9 +1,20 @@
-"""Agent Watch: observability for AI agents."""
+"""Agent Watch: observability and cost enforcement for AI agents."""
 
-__version__ = "0.1.0"
+__version__ = "1.0.0.dev0"
 
+from agent_watch.budget import BudgetExceeded
 from agent_watch.decorators import trace_agent, trace_llm_call
-from agent_watch.span import Span
-from agent_watch.types import Event
+from agent_watch.span import Span  # context manager
+from agent_watch.types import Span as SpanRecord  # dataclass (for exporters, advanced use)
 
-__all__ = ["trace_agent", "trace_llm_call", "Span", "Event"]
+# v0.1 deprecated alias
+Event = SpanRecord
+
+__all__ = [
+    "trace_agent",
+    "trace_llm_call",
+    "Span",
+    "SpanRecord",
+    "Event",
+    "BudgetExceeded",
+]

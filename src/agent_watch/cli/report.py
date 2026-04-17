@@ -6,15 +6,16 @@ from datetime import datetime, timedelta, timezone
 
 import click
 
+from agent_watch import otel
 from agent_watch.cli.formatting import bar_chart, format_cost, format_percentage, format_tokens
-from agent_watch.storage import aggregate_by_agent, aggregate_by_model, load_events
+from agent_watch.storage import aggregate_by_agent, aggregate_by_model, load_spans
 
 
 @click.command()
 @click.option("--days", "-d", default=7, help="Number of days to report on (default: 7)")
 def report_cmd(days: int):
     """Generate a full analytics report."""
-    previous_events = load_events(days=days * 2)
+    previous_events = load_spans(days=days * 2)
 
     # Split previous into "this period" and "last period"
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -34,14 +35,14 @@ def report_cmd(days: int):
     click.echo("=" * 50)
 
     # Overview
-    agent_runs = [e for e in current_events if e.type == "agent_run"]
-    llm_calls = [e for e in current_events if e.type == "llm_call"]
+    agent_runs = [e for e in current_events if e.kind == otel.KIND_AGENT]
+    llm_calls = [e for e in current_events if e.kind == otel.KIND_LLM]
     total_runs = len(agent_runs)
-    successes = sum(1 for e in agent_runs if e.status == "success")
+    successes = sum(1 for e in agent_runs if e.status == otel.STATUS_OK)
     success_rate = successes / total_runs if total_runs > 0 else 0
-    total_cost = sum(e.metadata.get("cost_usd", 0) for e in current_events)
-    total_input = sum(e.metadata.get("input_tokens", 0) for e in current_events)
-    total_output = sum(e.metadata.get("output_tokens", 0) for e in current_events)
+    total_cost = sum(e.attributes.get(otel.AGENT_WATCH_COST_USD, 0.0) for e in current_events)
+    total_input = sum(e.attributes.get(otel.GEN_AI_USAGE_INPUT_TOKENS, 0) for e in current_events)
+    total_output = sum(e.attributes.get(otel.GEN_AI_USAGE_OUTPUT_TOKENS, 0) for e in current_events)
 
     click.echo("\nOverview:")
     click.echo(f"  Total Runs:     {total_runs}")
@@ -85,12 +86,12 @@ def report_cmd(days: int):
 
     # Trends
     if prev_events:
-        prev_cost = sum(e.metadata.get("cost_usd", 0) for e in prev_events)
-        prev_runs = len([e for e in prev_events if e.type == "agent_run"])
+        prev_cost = sum(e.attributes.get(otel.AGENT_WATCH_COST_USD, 0.0) for e in prev_events)
+        prev_runs = len([e for e in prev_events if e.kind == otel.KIND_AGENT])
         prev_errors = sum(
-            1 for e in prev_events if e.type == "agent_run" and e.status == "error"
+            1 for e in prev_events if e.kind == otel.KIND_AGENT and e.status == otel.STATUS_ERROR
         )
-        current_errors = sum(1 for e in agent_runs if e.status == "error")
+        current_errors = sum(1 for e in agent_runs if e.status == otel.STATUS_ERROR)
         prev_error_rate = prev_errors / prev_runs if prev_runs > 0 else 0
         current_error_rate = current_errors / total_runs if total_runs > 0 else 0
 
@@ -137,9 +138,9 @@ def _detect_anomalies(events, agent_stats):
     # Group agent_run events by agent name and day
     from collections import defaultdict
 
-    daily_stats = defaultdict(lambda: defaultdict(lambda: {"success": 0, "error": 0}))
+    daily_stats = defaultdict(lambda: defaultdict(lambda: {otel.STATUS_OK: 0, otel.STATUS_ERROR: 0}))
     for event in events:
-        if event.type != "agent_run":
+        if event.kind != otel.KIND_AGENT:
             continue
         day = datetime.fromtimestamp(event.start_time, tz=timezone.utc).strftime("%b %-d")
         daily_stats[event.name][day][event.status] += 1
@@ -152,10 +153,10 @@ def _detect_anomalies(events, agent_stats):
         overall_error_rate = 1 - stats.success_rate
 
         for day, counts in daily_stats.get(name, {}).items():
-            day_total = counts["success"] + counts["error"]
+            day_total = counts[otel.STATUS_OK] + counts[otel.STATUS_ERROR]
             if day_total < 2:
                 continue
-            day_error_rate = counts["error"] / day_total
+            day_error_rate = counts[otel.STATUS_ERROR] / day_total
 
             # Spike: day error rate is significantly higher than overall
             if day_error_rate > overall_error_rate + 0.05 and day_error_rate >= 0.1:

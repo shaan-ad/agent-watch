@@ -1,16 +1,32 @@
 # Agent Watch Roadmap
 
-## Vision
+## The pivot (April 2026)
 
-Agent Watch is the first tool every AI agent developer installs. It provides cost, latency, and reliability data from line one of development, with zero setup friction. When teams outgrow local analytics, they graduate to a platform. Agent Watch is the on-ramp, not the destination.
+Agent Watch launched as "the sqlite of LLM observability." Research into the April 2026 landscape killed that positioning:
+
+- **Langfuse was acquired by ClickHouse in January 2026.** The OSS observability race is effectively over.
+- **Arize Phoenix ships polished local mode**, Pydantic Logfire has a trusted brand, OpenLLMetry owns the OTel GenAI spec. "Local JSONL + decorators" is no longer differentiated.
+- **The unmet pain is enforcement, not observation.** Every competitor tracks cost. None stop a runaway agent at the decorator layer. The "$47,000 agent loop" post, the "$4,800 bill, nobody knew why" post, and the "$340 loop in an hour" post are canonical 2026 developer pain. Alerts are not enforcement.
+
+v1.0 pivots from "observability on-ramp" to **circuit breaker for runaway agent bills**, with OTel export as the credibility layer that keeps the on-ramp story true.
 
 ---
 
-## v0.1.0 (Current)
+## Positioning
 
-**Status:** Shipped
+**One-liner:** The circuit breaker your agents don't have. Set a budget. Get a kill-switch. Sleep at night.
 
-The foundation. Two decorators, local JSONL storage, and a CLI.
+**Villain:** Datadog's $120/day LLM premium, and the agent loops that trigger $4K surprise invoices before anyone notices.
+
+**Wedge:** Hard budget enforcement at the decorator. `BudgetExceeded` raised before the next LLM call fires, not after the bill arrives.
+
+**Graduation story (kept, quieter):** When you outgrow local enforcement and want shared dashboards, `agent-watch export --to langfuse` or `--to otlp` and take your data with you. No lock-in.
+
+---
+
+## v0.1.0 (shipped April 9, 2026)
+
+The foundation. Two decorators, local JSONL storage, a CLI.
 
 - [x] `@trace_agent` decorator (sync + async)
 - [x] `@trace_llm_call` decorator with auto cost estimation
@@ -23,159 +39,154 @@ The foundation. Two decorators, local JSONL storage, and a CLI.
 
 ---
 
-## v0.2.0 -- Developer Experience
+## v1.0.0: The Circuit Breaker (target: ~4 weeks from April 16, 2026)
 
-**Goal:** Make agent-watch feel like a native part of the development workflow, not a separate tool.
+**Goal:** Ship a Show HN that opens with a live demo of an agent burning simulated spend, caught and killed at a $5 cap by Agent Watch. No account. No Docker. One `pip install`.
 
-### Inline run summary
-Print a one-liner after every agent run so developers see cost/latency without running CLI commands:
-```
-[agent-watch] research-agent: $0.12 | 3.4s | 2,847 tokens | OK
-```
-Configurable via `AGENT_WATCH_QUIET=1` to suppress.
+### 1. Hard budget enforcement
 
-### `agent-watch watch` (live tail)
-Real-time stream of agent activity in the terminal. Like `tail -f` for your agents:
-```bash
-$ agent-watch watch
-14:32:01  research-agent    $0.12  3.4s  OK
-14:32:05  code-reviewer     $0.08  1.2s  OK
-14:32:09  research-agent    $0.31  5.1s  ERROR: context length exceeded
-```
+The core wedge. Decorators accept a budget cap. When crossed, the next LLM call raises `BudgetExceeded` instead of firing.
 
-### Tag-based filtering
-Filter all CLI commands by tags for A/B comparisons:
-```bash
-agent-watch costs --tag v2-prompt --compare v1-prompt
-```
-
-### JSON output mode
-Machine-readable output from every CLI command for scripting:
-```bash
-agent-watch status --json | jq '.total_cost'
-```
-
----
-
-## v0.3.0 -- Agent Intelligence
-
-**Goal:** Go beyond raw metrics. Help developers understand *why* their agents behave the way they do.
-
-### Cost-per-goal tracking
-Track cost at the task level, not just the call level. "This research task cost $2.40 across 7 LLM calls" instead of raw token counts:
 ```python
-@trace_agent(name="research", goal="Summarize competitor pricing")
-async def research(topic):
+from agent_watch import trace_agent, BudgetExceeded
+
+@trace_agent(name="research", budget_usd=5.00, on_exceed="raise")
+async def research(topic: str) -> str:
     ...
-```
-```bash
-$ agent-watch costs --by goal
-  "Summarize competitor pricing"    $2.40  (7 calls, 3 retries)
-  "Generate weekly report"          $0.89  (4 calls, 0 retries)
+
+try:
+    await research("summarize competitor pricing")
+except BudgetExceeded as e:
+    log.error(f"Killed at ${e.spent_usd:.2f} / ${e.budget_usd:.2f}")
 ```
 
-### Multi-agent correlation
-Trace execution across agent boundaries. When agent A calls agent B which calls agent C, see the full chain:
+- `budget_usd` at decorator level (per-run cap)
+- `AGENT_WATCH_BUDGET_USD` env var (per-process cap)
+- `on_exceed`: `"raise"` (default) or `"warn"`
+- Supports nested agents: child budgets inherit from parent unless overridden
+- `agent-watch budgets` CLI shows active caps and spend against them
+
+### 2. OTel-native span format
+
+Rewrite the JSONL schema to match the OpenTelemetry GenAI semantic conventions. Every span Agent Watch writes locally is already OTel-shaped, so export is a transform, not a rewrite.
+
+- Span names, attributes, events aligned to `gen_ai.*` conventions
+- Existing CLI commands keep working (read layer unchanged)
+- v0.1 JSONL files readable via a migration flag
+
+### 3. One-command exporters
+
+The graduation story made literal.
+
 ```bash
-$ agent-watch traces --trace-id abc123 --tree
-  orchestrator        $1.20  4.2s  OK
-    research-agent    $0.80  3.1s  OK
-      call_claude     $0.45  1.8s  OK
-      call_claude     $0.35  1.3s  OK
-    summarizer        $0.40  1.1s  OK
-      call_gpt4o      $0.40  1.1s  OK
+agent-watch export --to langfuse --endpoint https://cloud.langfuse.com
+agent-watch export --to phoenix --endpoint http://localhost:6006
+agent-watch export --to otlp --endpoint http://localhost:4317
+agent-watch export --to csv
 ```
 
-### Reliability scoring
-Track success rate trends with anomaly detection. Surface degradation before it becomes a problem:
+- Langfuse and Phoenix tested end to end against their hosted free tiers
+- OTLP export tested against a local collector
+- Exports are idempotent (re-running skips already-exported spans)
+
+### 4. `agent-watch diff`
+
+Git-bisect for agent runs. Show the per-step cost delta between two runs of the same agent.
+
 ```bash
-$ agent-watch health
-  research-agent     97.2% (7d avg)  stable
-  code-reviewer      84.1% (7d avg)  DEGRADING (was 96.3% last week)
-  summarizer         99.8% (7d avg)  stable
+$ agent-watch diff <run-id-a> <run-id-b>
+
+research-agent (ran 2x)
+  step                   run-a    run-b    delta
+  ──────────────────────────────────────────────────
+  call_claude (query)    $0.12    $0.38    +216%  ← new 3x larger prompt
+  call_claude (summary)  $0.08    $0.09    +12%
+  TOTAL                  $0.20    $0.47    +135%
 ```
 
-### Cost threshold alerts
-Set budget guardrails. Get warned in the terminal if a single run exceeds a threshold:
-```python
-@trace_agent(name="research", cost_limit=5.00)
-async def research(topic):
-    ...
+- Defaults: `agent-watch diff` compares the last two runs of the most recently traced agent
+- Works for any two run IDs
+- Output mode: terminal table, `--json` for scripting
+
+### 5. `agent-watch replay`
+
+Render a single self-contained HTML file for any run. No server, no dashboard.
+
+```bash
+$ agent-watch replay <run-id> --open
+# writes ./.agent-watch/replays/<run-id>.html and opens it
 ```
-```
-[agent-watch] WARNING: research-agent run exceeded $5.00 limit ($6.12)
-```
+
+- Timeline of spans with inputs, outputs, cost, latency
+- Interactive filter by span type
+- Works offline, embeddable in issue trackers or Slack threads
+
+### 6. Landing page with live demo
+
+`agentwatch.dev` (or similar). One page, one video, one install command.
+
+- 30-second video: agent loop in a terminal, spend climbing, Agent Watch kills it at $5
+- Copy-paste install snippet
+- Link to Show HN launch post and GitHub
+- No signup, no email capture
+
+### 7. Stability commitments
+
+- Public API frozen: no breaking changes to decorators or JSONL schema after v1.0
+- Performance: < 1ms overhead per span (benchmarked in CI)
+- Docs site at `agentwatch.dev/docs` (MkDocs or similar, shipped with the landing page)
+- Published to PyPI with verified publisher
 
 ---
 
-## v0.4.0 -- Graduation Path
+## Deliberately not in v1.0
 
-**Goal:** Make it seamless to move from local analytics to a team platform when you're ready.
+These were in the old roadmap. They are cut or deferred so v1.0 ships.
 
-### OpenTelemetry export
-Export traces as OTel spans to any compatible backend:
-```bash
-agent-watch export --format otlp --endpoint https://your-collector:4317
-```
-
-### Platform-specific export
-One-command export to popular platforms:
-```bash
-agent-watch export --format langfuse --endpoint https://cloud.langfuse.com
-agent-watch export --format datadog
-agent-watch export --format csv
-```
-
-### CI integration
-Run agent-watch checks in CI to catch cost/reliability regressions before merge:
-```yaml
-# .github/workflows/agent-check.yml
-- name: Check agent costs
-  run: |
-    agent-watch report --days 1 --format json | \
-    jq -e '.total_cost < 10.0' || exit 1
-```
-
-### Custom pricing overrides
-Load organization-specific pricing (negotiated rates, fine-tuned model costs):
-```bash
-export AGENT_WATCH_PRICING=./pricing.yaml
-```
+| Cut / deferred | Reason |
+|---|---|
+| Inline run summary (`[agent-watch] ...` after every run) | Nice polish, but does not sell the wedge. Add in v1.1 if users ask. |
+| `agent-watch watch` live tail | Solves a problem users don't have yet. Defer. |
+| Tag-based filtering and A/B compare | Power-user feature. v1.1. |
+| JSON output on all CLI commands | Add per-command as needed, not as a theme. |
+| Cost-per-goal tracking | Interesting, but `diff` delivers a stronger "aha." Revisit v1.1. |
+| Multi-agent correlation tree | OTel export makes this Phoenix's job. Do not rebuild it. |
+| Reliability scoring / health command | Secondary to the cost story. v1.2. |
+| TypeScript / JS SDK | Huge lift. Post-v1.0 only if Python lands hard. |
+| Plugin system for custom exporters | Ship three exporters well before abstracting. |
+| CI integration recipe | Documentation, not a feature. Add to docs site. |
+| Custom pricing YAML override | Keep the `AGENT_WATCH_PRICING` env var (simple), drop the elaborate schema. |
 
 ---
 
-## v1.0.0 -- Production Ready
+## Post-v1.0 (uncommitted)
 
-**Goal:** Stable, documented, trusted by teams in production.
+If v1.0 lands and users show up, these are the likely next bets in priority order:
 
-- [ ] Stable API (no breaking changes to decorators or JSONL schema)
-- [ ] Comprehensive docs site
-- [ ] TypeScript/JavaScript SDK (second language)
-- [ ] Plugin system for custom exporters
-- [ ] Benchmark suite (performance overhead < 1ms per span)
-- [ ] Published to PyPI with verified publisher
+1. **Inline run summary** and `watch` live tail (DX polish)
+2. **Cost-per-goal tracking** (`@trace_agent(goal="...")`)
+3. **CI recipe and pre-commit hook** (fail a PR if test-run cost regresses)
+4. **Reliability scoring** (`agent-watch health`)
+5. **Adapters for OpenAI Agents SDK, LangGraph, CrewAI** (auto-instrument, no decorators required)
+6. **TypeScript SDK** (only if Python adoption justifies it)
 
----
-
-## Future (Cloud, separate repo)
-
-Not part of the open-source CLI. These are team/enterprise features that require a server component:
-
-- Shared dashboard with team visibility
-- Role-based access control
-- Real-time alerting (Slack, email, PagerDuty)
-- Historical data retention and aggregation
-- SSO/SAML for enterprise
-- SOC 2 compliance
-
-The cloud product will be built in a separate private repository. The open-source CLI remains the on-ramp and the local development experience.
+Cloud product (shared dashboards, RBAC, SSO) stays out of this repo. If it happens, it happens in a separate private one.
 
 ---
 
 ## Principles
 
-1. **Zero friction beats features.** If a feature requires config, an account, or a browser tab, think twice.
-2. **CLI first.** Every feature works from the terminal. A dashboard is a future add-on, not the product.
-3. **Local by default.** Data stays on the developer's machine unless they explicitly export it.
-4. **Framework agnostic.** Works with LangChain, CrewAI, AutoGen, LangGraph, bare Python, or anything else.
-5. **Complement, don't compete.** Agent Watch is the on-ramp to Langfuse/Datadog/Arize, not a replacement.
+1. **Enforcement, then observation.** The wedge is stopping the bleeding. Observation is how you prove it worked.
+2. **Zero services.** No Docker, no Postgres, no account. One `pip install` and a Python import.
+3. **OTel-native at the core.** Every span is OTel-shaped. Exports are transforms, not translations.
+4. **The graduation ramp is real or it is not claimed.** Every exporter is tested end to end.
+5. **Cut to ship.** v1.0 is the circuit breaker plus credibility. Everything else waits.
+
+---
+
+## Launch plan (for reference, not the roadmap)
+
+- Week 1-2: Budget enforcement + OTel schema migration
+- Week 3: Exporters (Langfuse, Phoenix, OTLP) + `diff`
+- Week 4: `replay`, landing page, docs site, Show HN
+- Show HN title: "Show HN: Agent Watch, a circuit breaker for runaway agent bills (zero-config Python CLI)"

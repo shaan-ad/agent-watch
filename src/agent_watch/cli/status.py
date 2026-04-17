@@ -4,31 +4,33 @@ from __future__ import annotations
 
 import click
 
+from agent_watch import otel
 from agent_watch.cli.formatting import format_cost, format_percentage, format_tokens
-from agent_watch.storage import aggregate_by_agent, load_events
+from agent_watch.storage import aggregate_by_agent, load_spans
 
 
 @click.command()
 @click.option("--days", "-d", default=1, help="Number of days to look back (default: 1)")
 def status_cmd(days: int):
     """Show a summary of recent agent runs."""
-    events = load_events(days=days)
+    spans = load_spans(days=days)
 
-    if not events:
+    if not spans:
         click.echo("No events found. Instrument your agents with @trace_agent to get started.")
         return
 
-    agent_runs = [e for e in events if e.type == "agent_run"]
-    llm_calls = [e for e in events if e.type == "llm_call"]
+    agent_runs = [s for s in spans if s.kind == otel.KIND_AGENT]
+    llm_calls = [s for s in spans if s.kind == otel.KIND_LLM]
 
     total_runs = len(agent_runs)
-    successes = sum(1 for e in agent_runs if e.status == "success")
+    successes = sum(1 for s in agent_runs if s.status == otel.STATUS_OK)
     success_rate = successes / total_runs if total_runs > 0 else 0
 
-    total_cost = sum(e.metadata.get("cost_usd", 0) for e in events)
+    total_cost = sum(s.attributes.get(otel.AGENT_WATCH_COST_USD, 0.0) for s in spans)
     total_tokens = sum(
-        e.metadata.get("input_tokens", 0) + e.metadata.get("output_tokens", 0)
-        for e in events
+        s.attributes.get(otel.GEN_AI_USAGE_INPUT_TOKENS, 0)
+        + s.attributes.get(otel.GEN_AI_USAGE_OUTPUT_TOKENS, 0)
+        for s in spans
     )
 
     click.echo(f"\nAgent Watch Status (last {days} day{'s' if days > 1 else ''})")
@@ -40,7 +42,7 @@ def status_cmd(days: int):
     click.echo(f"  Total Tokens:  {format_tokens(total_tokens)}")
 
     # Top agents
-    agent_stats = aggregate_by_agent(events)
+    agent_stats = aggregate_by_agent(spans)
     if agent_stats:
         click.echo("\nTop Agents:")
         sorted_agents = sorted(

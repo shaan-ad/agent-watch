@@ -1,4 +1,4 @@
-"""Tests for the event collector."""
+"""Tests for the span collector."""
 
 from __future__ import annotations
 
@@ -9,9 +9,10 @@ from agent_watch.collector import (
     get_storage_dir,
     get_today_file,
     set_current_parent_id,
-    write_event,
+    write_span,
 )
-from agent_watch.types import Event
+from agent_watch.types import Span
+from agent_watch import otel
 
 
 def test_storage_dir_created(temp_storage):
@@ -26,10 +27,10 @@ def test_today_file_path(temp_storage):
     assert len(f.stem) == 10  # YYYY-MM-DD
 
 
-def test_write_event(temp_storage):
-    event = Event(type="test", name="test-event")
-    event.finish()
-    write_event(event)
+def test_write_span(temp_storage):
+    span = Span(name="test-span", kind=otel.KIND_AGENT)
+    span.finish()
+    write_span(span)
 
     filepath = get_today_file()
     assert filepath.exists()
@@ -39,20 +40,25 @@ def test_write_event(temp_storage):
     assert len(lines) == 1
 
     data = json.loads(lines[0])
-    assert data["name"] == "test-event"
-    assert data["type"] == "test"
+    assert data["name"] == "test-span"
+    assert data["kind"] == otel.KIND_AGENT
+    assert data["schema"] == otel.SCHEMA_VERSION
+    assert data["status"] == otel.STATUS_OK
 
 
-def test_write_multiple_events(temp_storage):
+def test_write_multiple_spans(temp_storage):
     for i in range(5):
-        event = Event(type="test", name=f"event-{i}")
-        event.finish()
-        write_event(event)
+        span = Span(name=f"span-{i}", kind=otel.KIND_AGENT)
+        span.finish()
+        write_span(span)
 
     filepath = get_today_file()
     with open(filepath) as f:
         lines = f.readlines()
     assert len(lines) == 5
+
+    names = [json.loads(line)["name"] for line in lines]
+    assert names == [f"span-{i}" for i in range(5)]
 
 
 def test_parent_id_context():
@@ -76,3 +82,18 @@ def test_parent_id_context():
     # Clear
     set_current_parent_id(None)
     assert get_current_parent_id() is None
+
+
+def test_get_current_trace_id_default_is_none():
+    from agent_watch.collector import get_current_trace_id
+    assert get_current_trace_id() is None
+
+
+def test_set_current_trace_id_returns_previous():
+    from agent_watch.collector import get_current_trace_id, set_current_trace_id
+    prev = set_current_trace_id("trace-abc")
+    assert get_current_trace_id() == "trace-abc"
+    assert prev is None
+    prev2 = set_current_trace_id(None)
+    assert prev2 == "trace-abc"
+    assert get_current_trace_id() is None

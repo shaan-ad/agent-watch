@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-
+from agent_watch import otel
 from agent_watch.storage import (
     AgentStats,
     aggregate_by_agent,
@@ -24,13 +24,13 @@ def test_load_events_filter_by_name(sample_events, temp_storage):
 
 def test_load_events_filter_by_status(sample_events, temp_storage):
     events = load_events(days=30, status="error", storage_dir=temp_storage)
-    assert all(e.status == "error" for e in events)
+    assert all(e.status == otel.STATUS_ERROR for e in events)
     assert len(events) == 1
 
 
 def test_load_events_filter_by_type(sample_events, temp_storage):
     events = load_events(days=30, event_type="llm_call", storage_dir=temp_storage)
-    assert all(e.type == "llm_call" for e in events)
+    assert all(e.kind == otel.KIND_LLM for e in events)
     assert len(events) == 1
 
 
@@ -71,10 +71,10 @@ def test_aggregate_by_model(sample_events, temp_storage):
 
 def test_agent_stats_avg_duration():
     stats = AgentStats(name="test")
-    from agent_watch.types import Event
+    from agent_watch.types import Span
 
-    e1 = Event(type="agent_run", name="test", duration_ms=1000)
-    e2 = Event(type="agent_run", name="test", duration_ms=3000)
+    e1 = Span(kind=otel.KIND_AGENT, name="test", duration_ms=1000)
+    e2 = Span(kind=otel.KIND_AGENT, name="test", duration_ms=3000)
     stats.add(e1)
     stats.add(e2)
 
