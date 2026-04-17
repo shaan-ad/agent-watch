@@ -122,3 +122,32 @@ def test_span_from_dict_raises_on_empty_dict():
 def test_span_from_dict_raises_on_unknown_schema():
     with pytest.raises(ValueError, match="Unknown schema"):
         Span.from_dict({"schema": "agent-watch/v999", "name": "x"})
+
+
+def test_storage_reads_v01_legacy_file(temp_storage):
+    """Files written by v0.1 remain readable after v1.0 upgrade."""
+    import time
+    from datetime import datetime, timezone
+
+    from agent_watch.storage import load_spans
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    filepath = temp_storage / f"{today}.jsonl"
+
+    now = time.time()
+    legacy_line = (
+        '{"id": "legacy-1", "type": "agent_run", "name": "v01-agent", '
+        f'"parent_id": null, "start_time": {now - 10}, "end_time": {now - 9}, '
+        '"duration_ms": 1000.0, "status": "success", "error": null, '
+        '"input_preview": null, "output_preview": null, '
+        '"metadata": {"model": "gpt-4", "cost_usd": 0.42, "input_tokens": 100, "output_tokens": 50}, '
+        '"children": []}\n'
+    )
+    filepath.write_text(legacy_line)
+
+    spans = load_spans(days=1, storage_dir=temp_storage)
+    assert len(spans) == 1
+    assert spans[0].name == "v01-agent"
+    assert spans[0].kind == otel.KIND_AGENT
+    assert spans[0].status == otel.STATUS_OK
+    assert spans[0].attributes[otel.AGENT_WATCH_COST_USD] == 0.42
