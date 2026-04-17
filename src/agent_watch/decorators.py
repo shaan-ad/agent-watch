@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import inspect
 import uuid
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Literal, Optional
 
 from agent_watch import otel
 from agent_watch.budget import (
@@ -34,7 +34,7 @@ def trace_agent(
     name: Optional[str] = None,
     tags: Optional[List[str]] = None,
     budget_usd: Optional[float] = None,
-    on_exceed: str = "raise",
+    on_exceed: Literal["raise", "warn"] = "raise",
 ) -> Callable:
     """Trace an agent function (sync or async).
 
@@ -138,6 +138,8 @@ def _finish_span(
 
 
 def _resolve_budget(agent_name: str, budget_usd: Optional[float], on_exceed: str) -> Optional[Budget]:
+    if on_exceed not in ("raise", "warn"):
+        raise ValueError(f"on_exceed must be 'raise' or 'warn', got {on_exceed!r}")
     cap = budget_usd if budget_usd is not None else get_env_budget_cap_usd()
     if cap is None:
         return None

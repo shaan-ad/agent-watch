@@ -8,14 +8,14 @@ import click
 
 from agent_watch import otel
 from agent_watch.cli.formatting import bar_chart, format_cost, format_percentage, format_tokens
-from agent_watch.storage import aggregate_by_agent, aggregate_by_model, load_events
+from agent_watch.storage import aggregate_by_agent, aggregate_by_model, load_spans
 
 
 @click.command()
 @click.option("--days", "-d", default=7, help="Number of days to report on (default: 7)")
 def report_cmd(days: int):
     """Generate a full analytics report."""
-    previous_events = load_events(days=days * 2)
+    previous_events = load_spans(days=days * 2)
 
     # Split previous into "this period" and "last period"
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)

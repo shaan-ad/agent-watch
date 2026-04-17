@@ -214,6 +214,17 @@ def test_nested_agents_both_budgets_count_spend(temp_storage):
     assert exc_info.value.agent_name == "parent"
 
 
+def test_trace_agent_rejects_invalid_on_exceed(temp_storage):
+    """An unrecognized on_exceed value raises at resolve time, not silently."""
+
+    @trace_agent(name="bad", budget_usd=1.0, on_exceed="kill")
+    def run():
+        return "ok"
+
+    with pytest.raises(ValueError, match="on_exceed must be"):
+        run()
+
+
 def test_sibling_agents_do_not_share_budget(temp_storage):
     """Two sequential agents with their own budgets: spend in one doesn't affect the other."""
 

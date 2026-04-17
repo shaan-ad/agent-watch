@@ -6,14 +6,14 @@ import click
 
 from agent_watch import otel
 from agent_watch.cli.formatting import format_cost, format_percentage, format_tokens
-from agent_watch.storage import aggregate_by_agent, load_events
+from agent_watch.storage import aggregate_by_agent, load_spans
 
 
 @click.command()
 @click.option("--days", "-d", default=1, help="Number of days to look back (default: 1)")
 def status_cmd(days: int):
     """Show a summary of recent agent runs."""
-    spans = load_events(days=days)
+    spans = load_spans(days=days)
 
     if not spans:
         click.echo("No events found. Instrument your agents with @trace_agent to get started.")

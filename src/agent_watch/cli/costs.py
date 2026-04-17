@@ -6,7 +6,7 @@ import click
 
 from agent_watch import otel
 from agent_watch.cli.formatting import bar_chart, format_cost, format_percentage, format_tokens
-from agent_watch.storage import aggregate_by_agent, aggregate_by_model, load_events
+from agent_watch.storage import aggregate_by_agent, aggregate_by_model, load_spans
 
 
 @click.command()
@@ -14,7 +14,7 @@ from agent_watch.storage import aggregate_by_agent, aggregate_by_model, load_eve
 @click.option("--by", type=click.Choice(["agent", "model", "both"]), default="both")
 def costs_cmd(days: int, by: str):
     """Show cost breakdown by agent and/or model."""
-    spans = load_events(days=days)
+    spans = load_spans(days=days)
 
     if not spans:
         click.echo("No events found.")

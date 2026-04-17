@@ -77,12 +77,12 @@ Agent Watch is the tool you use *before* you need an observability tool. Add two
 pip install agent-watch
 ```
 
-### 2. Add decorators
+### 2. Add decorators (with optional budget cap)
 
 ```python
-from agent_watch import trace_agent, trace_llm_call
+from agent_watch import trace_agent, trace_llm_call, BudgetExceeded
 
-@trace_agent(name="code-reviewer", tags=["production"])
+@trace_agent(name="code-reviewer", tags=["production"], budget_usd=5.00)
 def review_code(files: list[str]) -> str:
     analysis = call_llm(files)
     return analysis
@@ -92,6 +92,8 @@ def call_llm(prompt: str) -> dict:
     # Your LLM call (any provider, any framework)
     return {"content": "...", "input_tokens": 500, "output_tokens": 200}
 ```
+
+If the agent's cumulative LLM spend crosses `budget_usd`, the next call raises `BudgetExceeded` instead of firing. Set a process-wide default via the `AGENT_WATCH_BUDGET_USD` env var. Pass `on_exceed="warn"` to suppress the raise.
 
 ### 3. Run your agent, then check the terminal
 
@@ -245,7 +247,7 @@ The files are plain JSON Lines. Grep them, pipe them, write scripts against them
 
 ```bash
 # Find all runs that cost more than $1
-cat .agent-watch/2026-04-08.jsonl | jq 'select(.metadata.cost_usd > 1.0)'
+cat .agent-watch/2026-04-08.jsonl | jq 'select(.attributes."agent_watch.cost_usd" > 1.0)'
 ```
 
 ### Cost estimation
@@ -276,10 +278,12 @@ See [ROADMAP.md](ROADMAP.md) for the full feature plan: v0.2 (developer experien
 src/agent_watch/
   decorators.py     # @trace_agent, @trace_llm_call
   span.py           # Span context manager
-  collector.py      # Event capture and JSONL writing
+  budget.py         # Budget, BudgetExceeded, contextvar stack
+  collector.py      # Span capture and JSONL writing
   storage.py        # JSONL reading and querying
   cost.py           # Cost estimation from token counts
-  types.py          # Event dataclasses
+  types.py          # Span dataclass (OTel GenAI-aligned)
+  otel.py           # OTel attribute key constants
   cli/              # CLI commands (status, costs, traces, report, alerts)
 ```
 

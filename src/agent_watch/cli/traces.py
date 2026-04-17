@@ -6,7 +6,11 @@ import click
 
 from agent_watch import otel
 from agent_watch.cli.formatting import format_cost, format_duration
-from agent_watch.storage import load_events
+from agent_watch.storage import load_spans
+
+# Translation from user-facing v0.1 CLI flag vocabulary to v1 filter values.
+_STATUS_MAP = {"success": otel.STATUS_OK, "error": otel.STATUS_ERROR}
+_KIND_MAP = {"agent_run": otel.KIND_AGENT, "llm_call": otel.KIND_LLM, "span": otel.KIND_SPAN}
 
 
 @click.command()
@@ -17,11 +21,11 @@ from agent_watch.storage import load_events
 @click.option("--limit", "-n", default=20, help="Max events to show (default: 20)")
 def traces_cmd(days: int, agent: str, status: str, event_type: str, limit: int):
     """Browse execution traces."""
-    spans = load_events(
+    spans = load_spans(
         days=days,
         agent_name=agent,
-        status=status,
-        event_type=event_type,
+        status=_STATUS_MAP.get(status) if status else None,
+        kind=_KIND_MAP.get(event_type) if event_type else None,
     )
 
     if not spans:
