@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import click
 
+from agent_watch import otel
 from agent_watch.cli.formatting import format_cost, format_duration
 from agent_watch.storage import load_events
 
@@ -16,34 +17,34 @@ from agent_watch.storage import load_events
 @click.option("--limit", "-n", default=20, help="Max events to show (default: 20)")
 def traces_cmd(days: int, agent: str, status: str, event_type: str, limit: int):
     """Browse execution traces."""
-    events = load_events(
+    spans = load_events(
         days=days,
         agent_name=agent,
         status=status,
         event_type=event_type,
     )
 
-    if not events:
+    if not spans:
         click.echo("No traces found matching your filters.")
         return
 
     # Sort by start time, most recent first
-    events.sort(key=lambda e: e.start_time, reverse=True)
-    events = events[:limit]
+    spans.sort(key=lambda s: s.start_time, reverse=True)
+    spans = spans[:limit]
 
-    click.echo(f"\nTraces ({len(events)} events)")
+    click.echo(f"\nTraces ({len(spans)} events)")
     click.echo("=" * 70)
 
-    for event in events:
-        status_icon = "\u2713" if event.status == "success" else "\u2717"
-        cost = event.metadata.get("cost_usd", 0)
+    for span in spans:
+        status_icon = "\u2713" if span.status == otel.STATUS_OK else "\u2717"
+        cost = span.attributes.get(otel.AGENT_WATCH_COST_USD, 0.0)
         cost_str = format_cost(cost) if cost > 0 else ""
-        duration_str = format_duration(event.duration_ms) if event.duration_ms > 0 else ""
-        model = event.metadata.get("model", "")
+        duration_str = format_duration(span.duration_ms) if span.duration_ms > 0 else ""
+        model = span.attributes.get(otel.GEN_AI_REQUEST_MODEL, "")
 
         parts = [
-            f"  {status_icon} [{event.type}]",
-            event.name,
+            f"  {status_icon} [{span.kind}]",
+            span.name,
         ]
         if model:
             parts.append(f"({model})")
@@ -54,11 +55,11 @@ def traces_cmd(days: int, agent: str, status: str, event_type: str, limit: int):
 
         click.echo(" ".join(parts))
 
-        if event.error:
-            click.echo(f"    Error: {event.error[:100]}")
-        if event.input_preview:
-            click.echo(f"    In:  {event.input_preview[:80]}")
-        if event.output_preview:
-            click.echo(f"    Out: {event.output_preview[:80]}")
+        if span.error:
+            click.echo(f"    Error: {span.error[:100]}")
+        if span.input_preview:
+            click.echo(f"    In:  {span.input_preview[:80]}")
+        if span.output_preview:
+            click.echo(f"    Out: {span.output_preview[:80]}")
 
     click.echo()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import click
 
+from agent_watch import otel
 from agent_watch.cli.formatting import bar_chart, format_cost, format_percentage, format_tokens
 from agent_watch.storage import aggregate_by_agent, aggregate_by_model, load_events
 
@@ -13,16 +14,17 @@ from agent_watch.storage import aggregate_by_agent, aggregate_by_model, load_eve
 @click.option("--by", type=click.Choice(["agent", "model", "both"]), default="both")
 def costs_cmd(days: int, by: str):
     """Show cost breakdown by agent and/or model."""
-    events = load_events(days=days)
+    spans = load_events(days=days)
 
-    if not events:
+    if not spans:
         click.echo("No events found.")
         return
 
-    total_cost = sum(e.metadata.get("cost_usd", 0) for e in events)
+    total_cost = sum(s.attributes.get(otel.AGENT_WATCH_COST_USD, 0.0) for s in spans)
     total_tokens = sum(
-        e.metadata.get("input_tokens", 0) + e.metadata.get("output_tokens", 0)
-        for e in events
+        s.attributes.get(otel.GEN_AI_USAGE_INPUT_TOKENS, 0)
+        + s.attributes.get(otel.GEN_AI_USAGE_OUTPUT_TOKENS, 0)
+        for s in spans
     )
 
     click.echo(f"\nCost Report (last {days} days)")
@@ -32,7 +34,7 @@ def costs_cmd(days: int, by: str):
     click.echo()
 
     if by in ("agent", "both"):
-        agent_stats = aggregate_by_agent(events)
+        agent_stats = aggregate_by_agent(spans)
         if agent_stats:
             click.echo("Cost by Agent:")
             sorted_agents = sorted(
@@ -49,7 +51,7 @@ def costs_cmd(days: int, by: str):
             click.echo()
 
     if by in ("model", "both"):
-        model_stats = aggregate_by_model(events)
+        model_stats = aggregate_by_model(spans)
         if model_stats:
             click.echo("Cost by Model:")
             sorted_models = sorted(
