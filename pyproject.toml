@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-watch"
-version = "0.1.0"
-description = "Observability for AI agents. Track cost, latency, success rates, and token usage with zero framework lock-in."
+version = "1.0.0.dev0"
+description = "Circuit breaker for runaway agent bills. Hard budget enforcement, OTel-native, zero-config Python CLI."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
